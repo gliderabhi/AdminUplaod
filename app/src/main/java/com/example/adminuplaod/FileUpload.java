@@ -1,15 +1,19 @@
 package com.example.adminuplaod;
 
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.media.Image;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
@@ -19,13 +23,18 @@ import android.widget.Toast;
 
 import com.darsh.multipleimageselect.activities.AlbumSelectActivity;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Objects;
 
 public class FileUpload extends AppCompatActivity{
     private StorageReference mStorageRef;
@@ -35,12 +44,17 @@ public class FileUpload extends AppCompatActivity{
     private SharedPreferences preferences;
     private Intent i;
     SharedPreferences.Editor editor;
-
+    private static final int PICK_IMAGE = 1;
+    ArrayList<Uri> FileList = new ArrayList<Uri>();
+    private Uri FileUri;
+    private int upload_count = 0;
     int uploadedImageNo;
+    final int[] node = new int[1];
     ProgressDialog progress;
     StorageReference riversRef;
     String category;
     ImageView imageView;
+    Count cn;
     private DatabaseReference mDatabaseRef;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,34 +69,113 @@ public class FileUpload extends AppCompatActivity{
         select.setOnClickListener(v -> selectFile());
         imageView=findViewById(R.id.showfile);
         upload=findViewById( R.id.select );
-    }
-    public void selectFile ()
-    {
-        i = new Intent(Intent.ACTION_GET_CONTENT);
-        i.setType("image/*");
-        startActivityForResult(Intent.createChooser(i,"Select a file"), CODE);
+        getCount();
     }
 
+    private void getCount(){
+        //Log.e( "Msg","Getting image no" );
 
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        String filePath = data.getDataString();
-         imageView.setImageURI(data.getData());
-         imageView.setVisibility(View.VISIBLE);
-
-        Uri SelectedFileLocation=Uri.parse(filePath);
-        upload.setOnClickListener( new View.OnClickListener() {
+        FirebaseDatabase mFirebase= FirebaseDatabase.getInstance();
+        DatabaseReference mdata= mFirebase.getReference("count");
+        mdata.addValueEventListener( new ValueEventListener() {
             @Override
-            public void onClick(View v) {
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                //Log.e("msg", String.valueOf( dataSnapshot.getValue()) );
+                 cn = dataSnapshot.getValue( Count.class );
+                switch (category) {
+                    case "Celebrities":
+                        node[0] = Objects.requireNonNull( cn ).getCeleb();
+                        break;
+                    case "Cars":
+                        node[0] = Objects.requireNonNull( cn ).getCars();
+                        break;
+                    case "Space":
+                        node[0] = Objects.requireNonNull( cn ).getSpace();
+                        break;
+                    case "Nature":
+                        node[0] = Objects.requireNonNull( cn ).getNature();
+                        break;
+                    case "Buildings":
+                        node[0] = Objects.requireNonNull( cn ).getBuilding();
+                        break;
+                    case "Ocean":
+                        node[0] = Objects.requireNonNull( cn ).getOcean();
+                        break;
+                }
 
-                UploadFile(SelectedFileLocation);
+                Toast.makeText( getApplicationContext(),String.valueOf( node[0]),Toast.LENGTH_SHORT ).show();
             }
-        } );
 
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
 
-        super.onActivityResult(requestCode, resultCode, data);
+            }
+        });
+    }
+    public void selectFile () {
+        /*i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        startActivityForResult(Intent.createChooser(i,"Select a file"), CODE);*/
+
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+        startActivityForResult(intent,PICK_IMAGE);
     }
 
-    public  void UploadFile(Uri file) {
+    @SuppressLint("SetTextI18n")
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if(requestCode == PICK_IMAGE){
+
+            if(resultCode == RESULT_OK){
+
+                if(data.getClipData() != null){
+
+
+
+                    int countClipData = data.getClipData().getItemCount();
+
+
+
+                    int currentImageSelect = 0;
+
+                    while (currentImageSelect < countClipData){
+
+
+                        FileUri = data.getClipData().getItemAt(currentImageSelect).getUri();
+
+                        FileList.add(FileUri);
+
+                        currentImageSelect = currentImageSelect +1;
+
+
+                    }
+                    UploadFile(  );
+
+
+                }else{
+                    if(data.getData()!=null){
+
+                        Uri mImageUri=data.getData();
+                        FileList.add( mImageUri );
+
+                        UploadFile();
+
+                    }
+                }
+
+
+            }
+
+
+        }
+
+    }
+
+    public  void UploadFile() {
 
         mDatabaseRef= FirebaseDatabase.getInstance().getReference();
         uploadedImageNo = 0;
@@ -98,59 +191,64 @@ public class FileUpload extends AppCompatActivity{
         riversRef = mStorageRef.child(category + "/" + String.valueOf(uploadedImageNo) + ".jpg");
         progress = new ProgressDialog(this);
         progress.setMessage("Uploading Image");
-        progress.setProgressStyle(ProgressDialog.STYLE_SPINNER);
+        progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         progress.setIndeterminate(true);
-        progress.show();
 
-        new Thread(() -> riversRef.putFile(file)
-                .addOnSuccessListener(taskSnapshot -> {
-                    riversRef.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
+
+
+        for(upload_count = 0; upload_count < FileList.size(); upload_count++){
+            int t= node[0]+ upload_count+1;
+            Uri IndividualFile = FileList.get(upload_count);
+            final StorageReference ImageName = riversRef.child("Image"+IndividualFile.getLastPathSegment());
+
+            ImageName.putFile(IndividualFile).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+                @Override
+                public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                    double progres = (100.0 * taskSnapshot.getBytesTransferred()) / taskSnapshot.getTotalByteCount();
+                    progress.show();
+                    ImageName.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
                         @Override
                         public void onSuccess(Uri uri) {
-                           Toast.makeText(getApplicationContext(),uri.toString(),Toast.LENGTH_LONG).show();
-                            Upload upload = new Upload(String.valueOf(uploadedImageNo) + ".jpg",
-                                    uri.toString());
-
-                            DatabaseReference newRef = mDatabaseRef.child("/"+category).child(String.valueOf(uploadedImageNo));
-                            newRef.setValue(upload);
-
-                            DatabaseReference count=mDatabaseRef.child( "/count/" );
-                            Count count1=new Count( preferences.getInt( Constants.celebNo,0 ),preferences.getInt( Constants.carNo,0),
-                                                    preferences.getInt( Constants.buildingNo,0 ),preferences.getInt( Constants.natureNo,0 ),
-                                                    preferences.getInt( Constants.spaceNo,0 ),preferences.getInt( Constants.oceanNo,0 ) );
-                            count.setValue( count1 );
+                            String url = String.valueOf(uri);
+                            String name = String.valueOf( t )+ ".jpg";
+                            Upload x= new Upload( name,url );
+                            StoreLink(x,t);
 
                         }
                     });
-                    Toast.makeText(FileUpload.this, "Upload Success", Toast.LENGTH_SHORT).show();
-                    progress.dismiss();
-                    progress.cancel();
-
-                    uploadedImageNo = uploadedImageNo + 1;
-                    editor = preferences.edit();
-                    switch (category){
-                        case "Celebrities" : editor.putInt( Constants.celebNo,uploadedImageNo );break;
-                        case "Cars" : editor.putInt( Constants.carNo,uploadedImageNo );break;
-                        case "Space" : editor.putInt( Constants.spaceNo,uploadedImageNo );break;
-                        case "Nature" : editor.putInt( Constants.natureNo,uploadedImageNo );break;
-                        case "Buildings" :editor.putInt( Constants.buildingNo,uploadedImageNo );break;
-                        case "Ocean" : editor.putInt( Constants.oceanNo,uploadedImageNo );break;
-                    }
-
-                    editor.apply();
-                })
-                .addOnFailureListener(exception -> {
-                    progress.dismiss();
-                    progress.cancel();
-                    Toast.makeText(FileUpload.this, "Upload Failed", Toast.LENGTH_SHORT).show();
-                    exception.printStackTrace();
-                })).start();
 
 
+                }
+            });
+
+
+        }
+    }
+
+    private void StoreLink(Upload upload, int num) {
+
+        DatabaseReference newRef = mDatabaseRef.child("/"+category);
+        newRef.push().setValue( upload );
+        switch (category){
+            case "Celebrities" : cn.setCeleb(  num );break;
+            case "Cars" : cn.setCars( num );break;
+            case "Space" : cn.setSpace( num );break;
+            case "Nature" : cn.setNature( num );break;
+            case "Buildings" :cn.setBuilding( num );break;
+            case "Ocean" : cn.setOcean( num );break;
+        }
+        DatabaseReference count= mDatabaseRef.child( "/count/" );
+        count.setValue( cn );
+
+        if(num == node[0]+FileList.size()){
+            progress.dismiss();
+        }
 
     }
 
-    @Override
+
+
+            @Override
     public void onDestroy() {
         super.onDestroy();
 
